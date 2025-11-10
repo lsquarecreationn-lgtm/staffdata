@@ -18,7 +18,7 @@ ACADEMIC_Q = [
 ]
 
 PROF_Q = [
-    "B.Ed.", "M.Ed.", "B.P.Ed.", "M.P.Ed.", "D.El.Ed.", "D.Ed.",
+    "NA", "B.Ed.", "M.Ed.", "B.P.Ed.", "M.P.Ed.", "D.El.Ed.", "D.Ed.",
     "TTC", "NTT", "SET", "NET", "CTET", "STET", "M.Phil.", "Ph.D."
 ]
 
@@ -27,6 +27,7 @@ SECTIONS = [
     "Girls Section (Morning)", "Girls Section (Evening)",
     "Junior Section (Morning)", "Junior Section (Evening)",
     "KG Section (Morning)", "KG Section (Evening)"
+    "Admin Section", 
 ]
 
 MASTER_SAVE_PATH = "/tmp/master_staff_list.xlsx"
