@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+import os
 
 st.set_page_config(page_title="IIS Staff Data • OASIS", layout="wide")
 
@@ -28,7 +29,8 @@ SECTIONS = [
     "KG Section (Morning)", "KG Section (Evening)"
 ]
 
-# Session variables
+MASTER_SAVE_PATH = "/tmp/master_staff_list.xlsx"
+
 if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
 if "user_step" not in st.session_state:
@@ -37,10 +39,8 @@ if "submissions" not in st.session_state:
     st.session_state.submissions = pd.DataFrame(columns=SUBMIT_HEADERS)
 
 @st.cache_data(show_spinner=False)
-def load_master(upload_bytes):
-    if upload_bytes is None:
-        return pd.DataFrame(columns=MASTER_HEADERS)
-    df = pd.read_excel(upload_bytes, dtype=str)
+def load_master_from_bytes(file_bytes):
+    df = pd.read_excel(file_bytes, dtype=str)
     df.columns = df.columns.str.strip()
     return df
 
@@ -55,13 +55,10 @@ mode = st.sidebar.radio("Choose Mode", ["User", "Admin"], index=0)
 if mode == "Admin":
     st.header("🔐 Admin Login")
 
-    # LOGIN SCREEN
     if not st.session_state.admin_logged_in:
         pwd = st.text_input("Enter Admin Password", type="password")
-        login_btn = st.button("Login")
-
-        if login_btn:
-            if pwd == "admin@9852":   # <--- CHANGE PASSWORD HERE IF NEEDED
+        if st.button("Login"):
+            if pwd == "admin@9852":
                 st.session_state.admin_logged_in = True
                 st.success("✅ Login Successful")
             else:
@@ -70,49 +67,46 @@ if mode == "Admin":
         if not st.session_state.admin_logged_in:
             st.stop()
 
-    # ADMIN CONTROL PANEL
     st.success("✅ Admin Access Granted")
 
     st.subheader("Upload Master Staff List (.xlsx)")
     master_file = st.file_uploader("Upload Excel", type=["xlsx"])
 
     if master_file:
-        st.session_state.master_upload = master_file
+        # Save file permanently
+        with open(MASTER_SAVE_PATH, "wb") as f:
+            f.write(master_file.getbuffer())
+        st.success("✅ Staff list updated and saved permanently.")
 
-    if st.session_state.get("master_upload") is not None:
-        master_df = load_master(st.session_state.master_upload.getvalue())
+    # Load master if exists
+    if os.path.exists(MASTER_SAVE_PATH):
+        with open(MASTER_SAVE_PATH, "rb") as f:
+            master_df = load_master_from_bytes(f.read())
 
         # Normalize headers
         rename_map = {}
         for c in master_df.columns:
-            lc = c.lower().strip()
-            if lc.startswith("emp"):
+            lg = c.lower().strip()
+            if lg.startswith("emp"):
                 rename_map[c] = "Emp. No."
-            if "name" in lc:
+            if "name" in lg:
                 rename_map[c] = "NAME"
         master_df = master_df.rename(columns=rename_map)
-
-        if set(MASTER_HEADERS).issubset(master_df.columns):
-            st.dataframe(master_df[MASTER_HEADERS], use_container_width=True)
-        else:
-            st.error("Excel must contain columns: Emp. No. and NAME")
+        st.dataframe(master_df[MASTER_HEADERS], use_container_width=True)
+    else:
+        st.warning("⚠️ No Staff Master List uploaded yet.")
 
     st.divider()
     st.subheader("🗂 Submitted Records")
-
     st.dataframe(st.session_state.submissions, use_container_width=True)
 
     col1, col2, col3 = st.columns(3)
-
     with col1:
-        st.download_button("⬇️ Download Submitted", to_excel(st.session_state.submissions),
-                           "submitted.xlsx")
-
+        st.download_button("⬇️ Download Submitted", to_excel(st.session_state.submissions), "submitted.xlsx")
     with col2:
-        if st.session_state.get("master_upload") is not None:
+        if os.path.exists(MASTER_SAVE_PATH):
             ns = master_df[~master_df["Emp. No."].isin(st.session_state.submissions["Emp. No."])]
             st.download_button("⬇️ Download Not Submitted", to_excel(ns), "not_submitted.xlsx")
-
     with col3:
         if st.button("🗑 Clear All Submissions"):
             st.session_state.submissions = pd.DataFrame(columns=SUBMIT_HEADERS)
@@ -124,11 +118,13 @@ else:
     st.caption("Verify your Employee Number to begin.")
     st.divider()
 
-    if st.session_state.get("master_upload") is None:
+    # Load master from permanent storage
+    if not os.path.exists(MASTER_SAVE_PATH):
         st.warning("⚠️ Admin has not uploaded the staff list yet.")
         st.stop()
 
-    master_df = load_master(st.session_state.master_upload.getvalue())
+    with open(MASTER_SAVE_PATH, "rb") as f:
+        master_df = load_master_from_bytes(f.read())
 
     # Normalize headers
     rename_map = {}
@@ -140,7 +136,7 @@ else:
             rename_map[c] = "NAME"
     master_df = master_df.rename(columns=rename_map)
 
-    # Step 1: Verify Emp No
+    # Step 1: Verify
     if st.session_state.user_step == 1:
         emp_no = st.text_input("Enter Your Employee Number", placeholder="Example: 10025").strip()
         if st.button("Verify"):
@@ -164,10 +160,10 @@ else:
         if c2.button("Change Number ↩"):
             st.session_state.user_step = 1
 
-    # Step 3: Form
+    # Step 3: Fill Form
     if st.session_state.user_step == 3:
         if st.session_state.emp_no in st.session_state.submissions["Emp. No."].values:
-            st.warning("⚠️ You already submitted. Duplicate not allowed.")
+            st.warning("⚠️ You have already submitted. Duplicate not allowed.")
             st.stop()
 
         st.subheader("Qualification Form")
@@ -189,7 +185,9 @@ else:
                 "Section": section,
                 "Submitted At": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            st.session_state.submissions = pd.concat([st.session_state.submissions, pd.DataFrame([new])], ignore_index=True)
+            st.session_state.submissions = pd.concat(
+                [st.session_state.submissions, pd.DataFrame([new])], ignore_index=True
+            )
             st.success("✅ Submitted Successfully!")
             st.balloons()
             st.session_state.user_step = 1
