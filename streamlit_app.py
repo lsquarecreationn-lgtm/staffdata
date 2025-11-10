@@ -1,9 +1,8 @@
-
 import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-st.set_page_config(page_title="IIS Staff Data • OASIS (Streamlit)", layout="wide")
+st.set_page_config(page_title="IIS Staff Data • OASIS", layout="wide")
 
 MASTER_HEADERS = ["Emp. No.", "NAME"]
 SUBMIT_HEADERS = ["Emp. No.", "NAME", "Mobile", "Email",
@@ -16,10 +15,12 @@ ACADEMIC_Q = [
     "B.A.", "B.Sc.", "B.Com.", "B.Ed.", "BBA", "BCA", "B.Tech", "B.E.",
     "Diploma", "PG Diploma", "Inter/PUC (+2)", "SSLC/10th"
 ]
+
 PROF_Q = [
     "B.Ed.", "M.Ed.", "B.P.Ed.", "M.P.Ed.", "D.El.Ed.", "D.Ed.",
     "TTC", "NTT", "SET", "NET", "CTET", "STET", "M.Phil.", "Ph.D."
 ]
+
 SECTIONS = [
     "Boys Section (Morning)", "Boys Section (Evening)",
     "Girls Section (Morning)", "Girls Section (Evening)",
@@ -27,177 +28,165 @@ SECTIONS = [
     "KG Section (Morning)", "KG Section (Evening)"
 ]
 
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+if "user_step" not in st.session_state:
+    st.session_state.user_step = 1
+if "submissions" not in st.session_state:
+    st.session_state.submissions = pd.DataFrame(columns=SUBMIT_HEADERS)
+
 @st.cache_data(show_spinner=False)
-def load_master(upload_bytes: bytes) -> pd.DataFrame:
+def load_master(upload_bytes):
     if upload_bytes is None:
         return pd.DataFrame(columns=MASTER_HEADERS)
-    return pd.read_excel(upload_bytes, dtype=str).rename(columns=lambda c: c.strip())
+    df = pd.read_excel(upload_bytes, dtype=str)
+    df.columns = df.columns.str.strip()
+    return df
 
-def ensure_submit_df() -> pd.DataFrame:
-    if "submissions" not in st.session_state:
-        st.session_state["submissions"] = pd.DataFrame(columns=SUBMIT_HEADERS)
-    return st.session_state["submissions"]
+def to_excel(df):
+    out = BytesIO()
+    df.to_excel(out, index=False)
+    return out.getvalue()
 
-def to_excel_bytes(df: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
+mode = st.sidebar.radio("Choose Mode", ["User", "Admin"], index=0)
 
-mode = st.sidebar.radio("Choose mode", ["User", "Admin"], index=0)
-st.sidebar.caption("Default is **User**. Admin requires password.")
-
+# ---------------- ADMIN PANEL ----------------
 if mode == "Admin":
-    st.header("🔐 Admin")
-    pwd = st.text_input("Enter Admin Password", type="password", placeholder="••••••")
-    if pwd != st.secrets.get("ADMIN_PASSWORD", "admin@9852"):
-        st.info("Provide the correct admin password to continue.")
+    st.header("🔐 Admin Login")
+
+    if not st.session_state.admin_logged_in:
+        pwd = st.text_input("Enter Admin Password", type="password")
+        if st.button("Login"):
+            if pwd == "admin@9852":   # CHANGE PASSWORD HERE IF NEEDED
+                st.session_state.admin_logged_in = True
+                st.success("✅ Login Successful")
+                st.experimental_rerun()
+            else:
+                st.error("❌ Incorrect Password")
         st.stop()
 
-    st.success("✅ Admin authenticated")
-    st.subheader("1) Upload Master Staff List (Excel)")
-    st.caption("Required headers: ‘Emp. No.’ and ‘NAME’.")
-    master_file = st.file_uploader("Upload master Excel (.xlsx)", type=["xlsx"], key="master_upload")
+    st.success("✅ Admin Access Granted")
 
-    master_df = load_master(master_file.getvalue() if master_file else None)
-    if not master_df.empty:
-        cols = {c: c for c in master_df.columns}
+    st.subheader("Upload Master Staff List (Excel)")
+    master_file = st.file_uploader("Upload .xlsx", type=["xlsx"])
+
+    # ✅ STORE THE FILE SO USER VIEW CAN ACCESS IT
+    if master_file:
+        st.session_state.master_upload = master_file
+
+    if st.session_state.get("master_upload") is not None:
+        master_df = load_master(st.session_state.master_upload.getvalue())
+
+        rename_map = {}
         for c in master_df.columns:
             lc = c.lower().strip()
-            if lc in ["emp no", "emp. no.", "emp_no", "empno", "emp. no"]:
-                cols[c] = "Emp. No."
-            if lc in ["name", "full name", "employee name"]:
-                cols[c] = "NAME"
-        master_df = master_df.rename(columns=cols)
-        missing = [h for h in MASTER_HEADERS if h not in master_df.columns]
-        if missing:
-            st.error(f"Missing required header(s): {missing}")
+            if lc.startswith("emp"):
+                rename_map[c] = "Emp. No."
+            if "name" in lc:
+                rename_map[c] = "NAME"
+        master_df = master_df.rename(columns=rename_map)
+
+        if set(MASTER_HEADERS).issubset(master_df.columns):
+            st.dataframe(master_df[MASTER_HEADERS], use_container_width=True)
         else:
-            st.dataframe(master_df[MASTER_HEADERS], use_container_width=True, height=300)
+            st.error("Excel must contain columns exactly: Emp. No. and NAME")
 
     st.divider()
-    st.subheader("2) View / Export Submissions")
-    sub_df = ensure_submit_df()
-    st.write(f"Total submissions: **{len(sub_df)}**")
-    st.dataframe(sub_df, use_container_width=True, height=320)
+    st.subheader("Submitted Records")
+    st.dataframe(st.session_state.submissions, use_container_width=True)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.download_button("⬇️ Download Submissions (Excel)",
-                           data=to_excel_bytes(sub_df),
-                           file_name="submissions.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("⬇️ Download Submitted", to_excel(st.session_state.submissions),
+                           "submitted.xlsx")
     with c2:
-        if not master_df.empty and set(MASTER_HEADERS).issubset(master_df.columns):
-            not_submitted = master_df[~master_df["Emp. No."].astype(str).isin(sub_df["Emp. No."].astype(str))]
-            st.download_button("⬇️ Download NOT Submitted (Excel)",
-                               data=to_excel_bytes(not_submitted),
-                               file_name="not_submitted.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.button("⬇️ Download NOT Submitted (Excel)", disabled=True)
+        if st.session_state.get("master_upload") is not None:
+            ns = master_df[~master_df["Emp. No."].isin(st.session_state.submissions["Emp. No."])]
+            st.download_button("⬇️ Download Not Submitted", to_excel(ns), "not_submitted.xlsx")
     with c3:
-        if st.button("🗑 Clear submissions (session only)"):
-            st.session_state["submissions"] = pd.DataFrame(columns=SUBMIT_HEADERS)
-            st.experimental_rerun()
+        if st.button("🗑 Clear All Submissions"):
+            st.session_state.submissions = pd.DataFrame(columns=SUBMIT_HEADERS)
+            st.success("Cleared")
 
-    st.info("Files on Streamlit Cloud are ephemeral. Keep exported copies.")
-
+# ---------------- USER PAGE ----------------
 else:
-    st.header("👤 Staff Self‑Entry Portal (User)")
-    st.caption("Step‑1: Enter your Employee Number. We will verify your NAME from the master list.")
+    st.header("👤 Staff Self-Entry Form")
+    st.caption("Verify your Employee Number first to begin.")
     st.divider()
 
-    master_file_state = st.session_state.get("master_upload")
-    if master_file_state is None:
-        st.warning("Admin hasn’t uploaded the Master Staff Excel in this session yet. Please ask Admin to upload it from the Admin tab.")
+    if st.session_state.get("master_upload") is None:
+        st.warning("⚠️ Admin has not uploaded staff list yet. Please contact Admin.")
         st.stop()
 
-    master_df = load_master(master_file_state.getvalue())
-    cols = {c: c for c in master_df.columns}
+    master_df = load_master(st.session_state.master_upload.getvalue())
+
+    rename_map = {}
     for c in master_df.columns:
         lc = c.lower().strip()
-        if lc in ["emp no", "emp. no.", "emp_no", "empno", "emp. no"]:
-            cols[c] = "Emp. No."
-        if lc in ["name", "full name", "employee name"]:
-            cols[c] = "NAME"
-    master_df = master_df.rename(columns=cols)
-    missing = [h for h in MASTER_HEADERS if h not in master_df.columns]
-    if missing:
-        st.error("Master list columns are incorrect. Please ask Admin to re-upload.")
-        st.stop()
+        if lc.startswith("emp"):
+            rename_map[c] = "Emp. No."
+        if "name" in lc:
+            rename_map[c] = "NAME"
+    master_df = master_df.rename(columns=rename_map)
 
-    sub_df = ensure_submit_df()
-    step = st.session_state.get("user_step", 1)
+    # Step 1 → Enter Emp No.
+    if st.session_state.user_step == 1:
+        emp_no = st.text_input("Enter your Employee Number", placeholder="Example: 10025").strip()
 
-    if step == 1:
-        emp_no = st.text_input("Enter your Employee Number", placeholder="e.g., 10025").strip()
-        if st.button("Verify"):
+        if st.button("Verify Employee Number"):
             row = master_df[master_df["Emp. No."].astype(str).str.strip() == emp_no]
             if row.empty:
-                st.error("Employee number not found. Please check with Admin.")
+                st.error("❌ Employee Number not found. Try again.")
             else:
-                name = row.iloc[0]["NAME"]
-                st.session_state["emp_no"] = emp_no
-                st.session_state["emp_name"] = str(name)
-                st.session_state["user_step"] = 2
+                st.session_state.emp_no = emp_no
+                st.session_state.emp_name = row.iloc[0]["NAME"]
+                st.session_state.user_step = 2
                 st.experimental_rerun()
 
-    if step == 2:
-        st.success("Employee number found in the master list.")
-        st.metric("Employee Number", st.session_state.get("emp_no", ""))
-        st.metric("Name", st.session_state.get("emp_name", ""))
-        st.write("If this is correct, click Confirm to continue.")
+    # Step 2 → Confirm name
+    if st.session_state.user_step == 2:
+        st.success("✅ Employee Found")
+        st.write(f"**Employee Number:** {st.session_state.emp_no}")
+        st.write(f"**Name:** {st.session_state.emp_name}")
+
         c1, c2 = st.columns(2)
-        if c1.button("✅ Confirm"):
-            st.session_state["user_step"] = 3
+        if c1.button("Confirm ✅"):
+            st.session_state.user_step = 3
             st.experimental_rerun()
-        if c2.button("↩️ Change Number"):
-            st.session_state["user_step"] = 1
+        if c2.button("Change Number ↩"):
+            st.session_state.user_step = 1
             st.experimental_rerun()
 
-    if step == 3:
-        emp_no = st.session_state.get("emp_no")
-        emp_name = st.session_state.get("emp_name")
-
-        if not sub_df[sub_df["Emp. No."].astype(str) == str(emp_no)].empty:
-            st.warning("You have already submitted the form. Duplicate entries are not allowed.")
+    # Step 3 → Form
+    if st.session_state.user_step == 3:
+        if st.session_state.emp_no in st.session_state.submissions["Emp. No."].values:
+            st.warning("⚠️ You have already submitted. Duplicate not allowed.")
             st.stop()
 
-        st.subheader("Form – Staff Qualification Details")
-        st.write(f"**Employee Number:** {emp_no}   |   **Name:** {emp_name}")
+        st.subheader("Qualification Form")
+        mobile = st.text_input("Mobile Number")
+        email = st.text_input("Email Address")
 
-        mobile = st.text_input("Mobile Number", placeholder="e.g., 55512345")
-        email = st.text_input("Email", placeholder="name@example.com")
         col1, col2 = st.columns(2)
-        with col1:
-            acad = st.selectbox("Select Highest Academic Qualification", ACADEMIC_Q, index=2)
-        with col2:
-            prof = st.selectbox("Select Highest Professional Qualification", PROF_Q, index=0)
+        academic = col1.selectbox("Highest Academic Qualification", ACADEMIC_Q)
+        professional = col2.selectbox("Highest Professional Qualification", PROF_Q)
         section = st.selectbox("Select Section", SECTIONS)
 
-        if st.button("📨 Submit"):
-            if not emp_no or not emp_name:
-                st.error("Verification missing. Please go back.")
-            else:
-                rec = {
-                    "Emp. No.": str(emp_no),
-                    "NAME": str(emp_name),
-                    "Mobile": mobile.strip(),
-                    "Email": email.strip(),
-                    "Highest Academic Qualification": acad,
-                    "Highest Professional Qualification": prof,
-                    "Section": section,
-                    "Submitted At": pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S UTC')
-                }
-                st.session_state["submissions"] = pd.concat([sub_df, pd.DataFrame([rec])], ignore_index=True)
-                st.success("✅ Submitted successfully!")
-                st.balloons()
-                st.session_state["user_step"] = 4
-                st.experimental_rerun()
-
-    if step == 4:
-        st.success("Your response has been recorded. Thank you!")
-        if st.button("Submit another response"):
-            st.session_state["user_step"] = 1
-            st.experimental_rerun()
+        if st.button("Submit ✅"):
+            new_data = {
+                "Emp. No.": st.session_state.emp_no,
+                "NAME": st.session_state.emp_name,
+                "Mobile": mobile,
+                "Email": email,
+                "Highest Academic Qualification": academic,
+                "Highest Professional Qualification": professional,
+                "Section": section,
+                "Submitted At": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            st.session_state.submissions = pd.concat(
+                [st.session_state.submissions, pd.DataFrame([new_data])],
+                ignore_index=True
+            )
+            st.success("✅ Submitted Successfully!")
+            st.balloons()
+            st.session_state.user_step = 1
