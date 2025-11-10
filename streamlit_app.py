@@ -28,6 +28,7 @@ SECTIONS = [
     "KG Section (Morning)", "KG Section (Evening)"
 ]
 
+# Session variables
 if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
 if "user_step" not in st.session_state:
@@ -56,8 +57,9 @@ if mode == "Admin":
 
     if not st.session_state.admin_logged_in:
         pwd = st.text_input("Enter Admin Password", type="password")
+
         if st.button("Login"):
-            if pwd == "admin@9852":   # CHANGE PASSWORD HERE IF NEEDED
+            if pwd == "admin@9852":   # Change if needed
                 st.session_state.admin_logged_in = True
                 st.success("✅ Login Successful")
                 st.experimental_rerun()
@@ -67,10 +69,9 @@ if mode == "Admin":
 
     st.success("✅ Admin Access Granted")
 
-    st.subheader("Upload Master Staff List (Excel)")
-    master_file = st.file_uploader("Upload .xlsx", type=["xlsx"])
+    st.subheader("Upload Master Staff List (.xlsx)")
+    master_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-    # ✅ STORE THE FILE SO USER VIEW CAN ACCESS IT
     if master_file:
         st.session_state.master_upload = master_file
 
@@ -89,24 +90,27 @@ if mode == "Admin":
         if set(MASTER_HEADERS).issubset(master_df.columns):
             st.dataframe(master_df[MASTER_HEADERS], use_container_width=True)
         else:
-            st.error("Excel must contain columns exactly: Emp. No. and NAME")
+            st.error("Excel must contain **Emp. No.** and **NAME** columns.")
 
     st.divider()
     st.subheader("Submitted Records")
     st.dataframe(st.session_state.submissions, use_container_width=True)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
         st.download_button("⬇️ Download Submitted", to_excel(st.session_state.submissions),
                            "submitted.xlsx")
-    with c2:
+
+    with col2:
         if st.session_state.get("master_upload") is not None:
             ns = master_df[~master_df["Emp. No."].isin(st.session_state.submissions["Emp. No."])]
             st.download_button("⬇️ Download Not Submitted", to_excel(ns), "not_submitted.xlsx")
-    with c3:
+
+    with col3:
         if st.button("🗑 Clear All Submissions"):
             st.session_state.submissions = pd.DataFrame(columns=SUBMIT_HEADERS)
-            st.success("Cleared")
+            st.success("✅ All submissions cleared")
 
 # ---------------- USER PAGE ----------------
 else:
@@ -115,7 +119,7 @@ else:
     st.divider()
 
     if st.session_state.get("master_upload") is None:
-        st.warning("⚠️ Admin has not uploaded staff list yet. Please contact Admin.")
+        st.warning("⚠️ Admin has not uploaded the staff list yet.")
         st.stop()
 
     master_df = load_master(st.session_state.master_upload.getvalue())
@@ -129,21 +133,21 @@ else:
             rename_map[c] = "NAME"
     master_df = master_df.rename(columns=rename_map)
 
-    # Step 1 → Enter Emp No.
+    # Step 1 – verify employee number
     if st.session_state.user_step == 1:
-        emp_no = st.text_input("Enter your Employee Number", placeholder="Example: 10025").strip()
+        emp_no = st.text_input("Enter Your Employee Number:", placeholder="Example: 10025").strip()
 
-        if st.button("Verify Employee Number"):
+        if st.button("Verify"):
             row = master_df[master_df["Emp. No."].astype(str).str.strip() == emp_no]
             if row.empty:
-                st.error("❌ Employee Number not found. Try again.")
+                st.error("❌ Employee Number not found.")
             else:
                 st.session_state.emp_no = emp_no
                 st.session_state.emp_name = row.iloc[0]["NAME"]
                 st.session_state.user_step = 2
                 st.experimental_rerun()
 
-    # Step 2 → Confirm name
+    # Step 2 – confirm name
     if st.session_state.user_step == 2:
         st.success("✅ Employee Found")
         st.write(f"**Employee Number:** {st.session_state.emp_no}")
@@ -157,8 +161,9 @@ else:
             st.session_state.user_step = 1
             st.experimental_rerun()
 
-    # Step 3 → Form
+    # Step 3 – form
     if st.session_state.user_step == 3:
+
         if st.session_state.emp_no in st.session_state.submissions["Emp. No."].values:
             st.warning("⚠️ You have already submitted. Duplicate not allowed.")
             st.stop()
@@ -166,7 +171,6 @@ else:
         st.subheader("Qualification Form")
         mobile = st.text_input("Mobile Number")
         email = st.text_input("Email Address")
-
         col1, col2 = st.columns(2)
         academic = col1.selectbox("Highest Academic Qualification", ACADEMIC_Q)
         professional = col2.selectbox("Highest Professional Qualification", PROF_Q)
