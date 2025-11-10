@@ -26,8 +26,8 @@ SECTIONS = [
     "Boys Section (Morning)", "Boys Section (Evening)",
     "Girls Section (Morning)", "Girls Section (Evening)",
     "Junior Section (Morning)", "Junior Section (Evening)",
-    "KG Section (Morning)", "KG Section (Evening)"
-    "Admin Section", 
+    "KG Section (Morning)", "KG Section (Evening)",
+    "Admin Section" 
 ]
 
 MASTER_SAVE_PATH = "/tmp/master_staff_list.xlsx"
